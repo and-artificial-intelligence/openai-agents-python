@@ -427,6 +427,24 @@ async def test_modal_sandbox_create_passes_idle_timeout(
 
 
 @pytest.mark.asyncio
+async def test_modal_sandbox_create_passes_persisted_sandbox_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    modal_module, create_calls, _registry_tags = _load_modal_module(monkeypatch)
+
+    client = modal_module.ModalSandboxClient()
+    session = await client.create(
+        options=modal_module.ModalSandboxClientOptions(
+            app_name="sandbox-tests",
+            sandbox_name="project-artifact-revision-lease-123",
+        ),
+    )
+
+    assert create_calls[0]["name"] == "project-artifact-revision-lease-123"
+    assert session.state.sandbox_name == "project-artifact-revision-lease-123"
+
+
+@pytest.mark.asyncio
 async def test_modal_sandbox_create_sets_default_cmd_for_custom_registry_image(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
