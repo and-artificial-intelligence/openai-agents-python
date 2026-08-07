@@ -143,6 +143,7 @@ async def _write_process_stdin(proc: ContainerProcess[bytes], data: bytes | byte
 class ModalSandboxClientOptions(BaseSandboxClientOptions):
     type: Literal["modal"] = "modal"
     app_name: str
+    sandbox_name: str | None = None
     sandbox_create_timeout_s: float | None = None
     workspace_persistence: WorkspacePersistenceMode = _WORKSPACE_PERSISTENCE_TAR
     snapshot_filesystem_timeout_s: float | None = None
@@ -156,6 +157,7 @@ class ModalSandboxClientOptions(BaseSandboxClientOptions):
     def __init__(
         self,
         app_name: str,
+        sandbox_name: str | None = None,
         sandbox_create_timeout_s: float | None = None,
         workspace_persistence: WorkspacePersistenceMode = _WORKSPACE_PERSISTENCE_TAR,
         snapshot_filesystem_timeout_s: float | None = None,
@@ -171,6 +173,7 @@ class ModalSandboxClientOptions(BaseSandboxClientOptions):
         super().__init__(
             type=type,
             app_name=app_name,
+            sandbox_name=sandbox_name,
             sandbox_create_timeout_s=sandbox_create_timeout_s,
             workspace_persistence=workspace_persistence,
             snapshot_filesystem_timeout_s=snapshot_filesystem_timeout_s,
@@ -289,6 +292,7 @@ class ModalSandboxSessionState(SandboxSessionState):
 
     type: Literal["modal"] = "modal"
     app_name: str
+    sandbox_name: str | None = None
     # Optional Modal image object id (enables reconstructing a custom image via Image.from_id()).
     image_id: str | None = None
     # Registry image tag (e.g. "debian:bookworm" or "ghcr.io/org/img:tag").
@@ -557,6 +561,7 @@ class ModalSandboxSession(BaseSandboxSession):
         volumes = self._modal_cloud_bucket_mounts_for_manifest()
         create_coro = modal.Sandbox.create.aio(
             app=app,
+            name=self.state.sandbox_name,
             image=self._image,
             workdir=self.state.manifest.root,
             env=manifest_envs,
@@ -1932,6 +1937,7 @@ class ModalSandboxClient(BaseSandboxClient[ModalSandboxClientOptions]):
             manifest=manifest,
             snapshot=snapshot_instance,
             app_name=app_name,
+            sandbox_name=options.sandbox_name,
             image_tag=state_image_tag,
             image_id=state_image_id,
             sandbox_id=state_sandbox_id,
