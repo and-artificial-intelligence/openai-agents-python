@@ -2003,6 +2003,7 @@ class ModalSandboxClient(BaseSandboxClient[ModalSandboxClientOptions]):
         if options is None:
             raise ValueError("ModalSandboxClient.create requires options with app_name")
         manifest = manifest or Manifest()
+        self._validate_create_manifest(manifest)
         app_name = options.app_name
         if not app_name:
             raise ValueError("ModalSandboxClient.create requires a valid app_name")
@@ -2177,6 +2178,7 @@ class ModalSandboxClient(BaseSandboxClient[ModalSandboxClientOptions]):
     ) -> SandboxSession:
         if not isinstance(state, ModalSandboxSessionState):
             raise TypeError("ModalSandboxClient.resume expects a ModalSandboxSessionState")
+        self._validate_session_state(state)
         state.assert_path_grants_rebound()
         inner = ModalSandboxSession.from_state(state)
         reconnected = await inner._ensure_sandbox()

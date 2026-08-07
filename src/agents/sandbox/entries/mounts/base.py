@@ -123,6 +123,7 @@ class DockerVolumeMountAdapter:
 
 class MountStrategyBase(BaseModel, abc.ABC):
     type: str
+    _provider_backend_id: ClassVar[str | None] = None
     _subclass_registry: ClassVar[dict[str, builtins.type[MountStrategyBase]]] = {}
 
     @classmethod
@@ -271,6 +272,7 @@ class InContainerMountStrategy(MountStrategyBase):
 
 class DockerVolumeMountStrategy(MountStrategyBase):
     type: Literal["docker_volume"] = "docker_volume"
+    _provider_backend_id: ClassVar[str] = "docker"
     driver: str
     driver_options: dict[str, str] = Field(default_factory=dict)
 

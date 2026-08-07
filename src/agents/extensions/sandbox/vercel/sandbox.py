@@ -1349,6 +1349,7 @@ class VercelSandboxClient(BaseSandboxClient[VercelSandboxClientOptions]):
         options: VercelSandboxClientOptions,
     ) -> SandboxSession:
         resolved_manifest = _resolve_manifest_root(manifest)
+        self._validate_create_manifest(resolved_manifest)
         if (
             _manifest_has_vercel_s3_credentials(resolved_manifest)
             and not options.allow_s3_credential_exposure
@@ -1414,6 +1415,7 @@ class VercelSandboxClient(BaseSandboxClient[VercelSandboxClientOptions]):
     async def resume(self, state: SandboxSessionState) -> SandboxSession:
         if not isinstance(state, VercelSandboxSessionState):
             raise TypeError("VercelSandboxClient.resume expects a VercelSandboxSessionState")
+        self._validate_session_state(state)
         state.assert_path_grants_rebound()
         if state.s3_mounts_non_resumable or _vercel_s3_mounts(state.manifest):
             raise MountConfigError(

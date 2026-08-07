@@ -5,6 +5,7 @@ from typing import Any, ClassVar, Generic, TypeVar, cast
 
 from pydantic import BaseModel, ConfigDict, model_serializer
 
+from ..errors import MountConfigError
 from ..manifest import Manifest
 from ..snapshot import SnapshotBase, SnapshotSpec
 from .base_sandbox_session import BaseSandboxSession
@@ -175,6 +176,7 @@ class BaseSandboxClient(abc.ABC, Generic[ClientOptionsT]):
 
     def serialize_session_state(self, state: SandboxSessionState) -> dict[str, object]:
         """Serialize backend-specific sandbox state into a JSON-compatible payload."""
+        self._validate_session_state(state)
         redacted_paths = set(state.path_grants_require_rebind)
         persistent_grants = []
         for grant in state.manifest.extra_path_grants:
@@ -192,14 +194,51 @@ class BaseSandboxClient(abc.ABC, Generic[ClientOptionsT]):
             payload[REDACTED_HOST_PATH_GRANT_PATHS_KEY] = sorted(redacted_paths)
         return payload
 
-    @staticmethod
+    @classmethod
     def _deserialize_session_state_payload(
+        cls,
         payload: dict[str, object],
         state_class: type[SandboxSessionState],
     ) -> SandboxSessionState:
+        from collections.abc import Mapping
+
+        from .._mount_security import assert_raw_manifest_mounts_deserializable
+
+        manifest = payload.get("manifest")
+        if not isinstance(manifest, Mapping):
+            raise MountConfigError(message="sandbox session manifest is missing or malformed")
+        assert_raw_manifest_mounts_deserializable(
+            manifest,
+            provider_backend_id=cls.backend_id,
+        )
         state = state_class.model_validate(payload)
+        cls._validate_session_state(state)
         return SandboxSessionState._mark_persisted_path_grants(state, payload=payload)
+
+    @classmethod
+    def _validate_session_state(cls, state: SandboxSessionState) -> None:
+        from .._mount_security import (
+            assert_manifest_mount_state_serializable,
+            validate_manifest_mount_credential_boundaries,
+        )
+
+        validate_manifest_mount_credential_boundaries(
+            state.manifest,
+            provider_backend_id=cls.backend_id,
+        )
+        assert_manifest_mount_state_serializable(state.manifest)
 
     @abc.abstractmethod
     def deserialize_session_state(self, payload: dict[str, object]) -> SandboxSessionState:
         """Deserialize backend-specific sandbox state from a JSON-compatible payload."""
+
+    @classmethod
+    def _validate_create_manifest(cls, manifest: Manifest | None) -> None:
+        if manifest is None:
+            return
+        from .._mount_security import validate_manifest_mount_credential_boundaries
+
+        validate_manifest_mount_credential_boundaries(
+            manifest,
+            provider_backend_id=cls.backend_id,
+        )

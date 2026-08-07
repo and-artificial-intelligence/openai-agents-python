@@ -77,7 +77,6 @@ DEFAULT_AUTO_SKIP = {
     "examples/sandbox/misc/reference_policy_mcp_server.py",
     "examples/sandbox/docker/mounts/azure_mount_read_write.py",
     "examples/sandbox/docker/mounts/gcs_mount_read_write.py",
-    "examples/sandbox/docker/mounts/s3_files_mount_read_write.py",
     "examples/sandbox/docker/mounts/s3_mount_read_write.py",
     "examples/sandbox/extensions/daytona/usaspending_text2sql/setup_db.py",
     "examples/sandbox/extensions/temporal/temporal_sandbox_agent.py",

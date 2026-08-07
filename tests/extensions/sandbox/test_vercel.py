@@ -3071,14 +3071,16 @@ async def test_vercel_snapshot_persistence_tears_down_ephemeral_mounts(
         workspace_persistence="snapshot",
         snapshot_expiration_ms=60_000,
     )
-    client = vercel_module.VercelSandboxClient()
-    resumed = await client.resume(restored_state)
+    resumed = vercel_module.VercelSandboxSession.from_state(restored_state)
+    snapshot_id = await resumed._restore_snapshot_reference_id(restored_state.snapshot)
+    assert snapshot_id is not None
+    await resumed._ensure_sandbox(source=SnapshotSource(snapshot_id=snapshot_id))
 
     assert mount._events == [("unmount", "/workspace/remote"), ("mount", "/workspace/remote")]
     assert "/workspace/remote/mounted.txt" not in _FakeAsyncSandbox.snapshots["vercel-snapshot-1"]
     with pytest.raises(vercel_module.WorkspaceReadNotFoundError):
-        await resumed._inner.read(Path("remote/mounted.txt"))
-    kept = await resumed._inner.read(Path("kept.txt"))
+        await resumed.read(Path("remote/mounted.txt"))
+    kept = await resumed.read(Path("kept.txt"))
     assert kept.read() == b"kept"
 
 

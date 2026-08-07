@@ -189,10 +189,7 @@ class UnixLocalSandboxSession(BaseSandboxSession):
         )
 
     async def apply_manifest(self, *, only_ephemeral: bool = False) -> MaterializationResult:
-        return await self._apply_manifest(
-            only_ephemeral=only_ephemeral,
-            provision_accounts=not only_ephemeral,
-        )
+        return await super().apply_manifest(only_ephemeral=only_ephemeral)
 
     async def provision_manifest_accounts(self) -> None:
         if self.state.manifest.users or self.state.manifest.groups:
@@ -431,6 +428,11 @@ class UnixLocalSandboxSession(BaseSandboxSession):
 
     async def _resolved_exec_context(self) -> tuple[dict[str, str], str]:
         env = os.environ.copy()
+        if self.state.manifest.mount_targets():
+            from .._mount_security import inherited_mount_credential_environment_names
+
+            for name in inherited_mount_credential_environment_names(env):
+                env.pop(name, None)
         env.update(await self.state.manifest.environment.resolve())
 
         workspace = Path(self.state.manifest.root)
@@ -1101,6 +1103,7 @@ class UnixLocalSandboxClient(BaseSandboxClient[UnixLocalSandboxClientOptions | N
         options: UnixLocalSandboxClientOptions | None = None,
     ) -> SandboxSession:
         resolved_options = options or UnixLocalSandboxClientOptions()
+        self._validate_create_manifest(manifest)
         if manifest is not None:
             _assert_unix_local_host_path_grants_unsupported(manifest)
         # For local execution, runner-created sessions should always get an isolated temp root
@@ -1162,6 +1165,7 @@ class UnixLocalSandboxClient(BaseSandboxClient[UnixLocalSandboxClientOptions | N
     ) -> SandboxSession:
         if not isinstance(state, UnixLocalSandboxSessionState):
             raise TypeError("UnixLocalSandboxClient.resume expects a UnixLocalSandboxSessionState")
+        self._validate_session_state(state)
         state.assert_path_grants_rebound()
         _assert_unix_local_host_path_grants_unsupported(state.manifest)
         inner = UnixLocalSandboxSession.from_state(state)

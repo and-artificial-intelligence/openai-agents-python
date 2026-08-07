@@ -976,7 +976,7 @@ async def test_r2_mount_builds_env_auth_config_with_custom_domain() -> None:
         "provider = Cloudflare\n"
         "endpoint = https://eu.r2.cloudflarestorage.com\n"
         "acl = private\n"
-        "env_auth = true\n"
+        "env_auth = false\n"
     )
 
 

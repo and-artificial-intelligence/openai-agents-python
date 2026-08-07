@@ -23,7 +23,7 @@ import uuid
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 from .... import _debug
 from ....logger import log_tool_action_warning
@@ -542,6 +542,7 @@ class BlaxelDriveMountStrategy(MountStrategyBase):
     """
 
     type: Literal["blaxel_drive"] = "blaxel_drive"
+    _provider_backend_id: ClassVar[str] = "blaxel"
 
     def validate_mount(self, mount: Mount) -> None:
         if not isinstance(mount, BlaxelDriveMount):

@@ -17,7 +17,6 @@ from openai.types.responses import ResponseTextDeltaEvent
 from agents import ModelSettings, Runner
 from agents.run import RunConfig
 from agents.sandbox import Manifest, SandboxAgent, SandboxRunConfig
-from agents.sandbox.entries import S3Mount
 
 if __package__ is None or __package__ == "":
     sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
@@ -28,7 +27,6 @@ from examples.sandbox.misc.workspace_shell import WorkspaceShellCapability
 try:
     from agents.extensions.sandbox import (
         DEFAULT_DAYTONA_WORKSPACE_ROOT,
-        DaytonaCloudBucketMountStrategy,
         DaytonaSandboxClient,
         DaytonaSandboxClientOptions,
     )
@@ -42,14 +40,8 @@ except Exception as exc:  # pragma: no cover - import path depends on optional e
 DEFAULT_QUESTION = "Summarize this cloud sandbox workspace in 2 sentences."
 
 
-def _build_manifest(
-    *,
-    cloud_bucket_name: str | None = None,
-    cloud_bucket_mount_path: str | None = None,
-    cloud_bucket_endpoint_url: str | None = None,
-    cloud_bucket_key_prefix: str | None = None,
-) -> Manifest:
-    """Build a small demo manifest, optionally including a cloud bucket mount."""
+def _build_manifest() -> Manifest:
+    """Build a small demo manifest."""
     manifest = text_manifest(
         {
             "README.md": (
@@ -69,20 +61,6 @@ def _build_manifest(
             ),
         }
     )
-    if cloud_bucket_name is None:
-        return Manifest(root=DEFAULT_DAYTONA_WORKSPACE_ROOT, entries=manifest.entries)
-
-    manifest.entries["cloud-bucket"] = S3Mount(
-        bucket=cloud_bucket_name,
-        access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
-        secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
-        session_token=os.environ.get("AWS_SESSION_TOKEN"),
-        endpoint_url=cloud_bucket_endpoint_url,
-        prefix=cloud_bucket_key_prefix,
-        mount_path=Path(cloud_bucket_mount_path) if cloud_bucket_mount_path is not None else None,
-        read_only=False,
-        mount_strategy=DaytonaCloudBucketMountStrategy(),
-    )
     return Manifest(root=DEFAULT_DAYTONA_WORKSPACE_ROOT, entries=manifest.entries)
 
 
@@ -98,20 +76,11 @@ async def main(
     question: str,
     pause_on_exit: bool,
     stream: bool,
-    cloud_bucket_name: str | None = None,
-    cloud_bucket_mount_path: str | None = None,
-    cloud_bucket_endpoint_url: str | None = None,
-    cloud_bucket_key_prefix: str | None = None,
 ) -> None:
     _require_env("OPENAI_API_KEY")
     _require_env("DAYTONA_API_KEY")
 
-    manifest = _build_manifest(
-        cloud_bucket_name=cloud_bucket_name,
-        cloud_bucket_mount_path=cloud_bucket_mount_path,
-        cloud_bucket_endpoint_url=cloud_bucket_endpoint_url,
-        cloud_bucket_key_prefix=cloud_bucket_key_prefix,
-    )
+    manifest = _build_manifest()
     agent = SandboxAgent(
         name="Daytona Sandbox Assistant",
         model=model,
@@ -169,29 +138,6 @@ if __name__ == "__main__":
         help="Pause the Daytona sandbox on shutdown instead of deleting it.",
     )
     parser.add_argument("--stream", action="store_true", default=False, help="Stream the response.")
-    parser.add_argument(
-        "--cloud-bucket-name",
-        default=None,
-        help="S3 bucket name to mount into the sandbox.",
-    )
-    parser.add_argument(
-        "--cloud-bucket-mount-path",
-        default=None,
-        help=(
-            "Mount path for --cloud-bucket-name. Relative paths are resolved under the "
-            "workspace root. Defaults to the mount class default."
-        ),
-    )
-    parser.add_argument(
-        "--cloud-bucket-endpoint-url",
-        default=None,
-        help="Optional endpoint URL for --cloud-bucket-name (S3 only, e.g. MinIO).",
-    )
-    parser.add_argument(
-        "--cloud-bucket-key-prefix",
-        default=None,
-        help="Optional key prefix for --cloud-bucket-name.",
-    )
     args = parser.parse_args()
 
     asyncio.run(
@@ -200,9 +146,5 @@ if __name__ == "__main__":
             question=args.question,
             pause_on_exit=args.pause_on_exit,
             stream=args.stream,
-            cloud_bucket_name=args.cloud_bucket_name,
-            cloud_bucket_mount_path=args.cloud_bucket_mount_path,
-            cloud_bucket_endpoint_url=args.cloud_bucket_endpoint_url,
-            cloud_bucket_key_prefix=args.cloud_bucket_key_prefix,
         )
     )

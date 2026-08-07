@@ -1102,6 +1102,9 @@ class RunState(Generic[TContext, TAgent]):
             include_tracing_api_key=include_tracing_api_key
         )
         if self._sandbox is not None:
+            from .sandbox._mount_security import assert_run_state_sandbox_mounts_serializable
+
+            assert_run_state_sandbox_mounts_serializable(self._sandbox)
             result["sandbox"] = copy.deepcopy(self._sandbox)
 
         return result
@@ -3293,7 +3296,13 @@ async def _build_run_state_from_json(
     else:
         state._trace_state = None
     sandbox_data = state_json.get("sandbox")
-    state._sandbox = dict(sandbox_data) if isinstance(sandbox_data, Mapping) else None
+    if isinstance(sandbox_data, Mapping):
+        from .sandbox._mount_security import assert_run_state_sandbox_mounts_serializable
+
+        assert_run_state_sandbox_mounts_serializable(sandbox_data)
+        state._sandbox = dict(sandbox_data)
+    else:
+        state._sandbox = None
 
     _validate_completed_tool_invocations(
         state,

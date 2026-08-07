@@ -1255,6 +1255,7 @@ class DaytonaSandboxClient(BaseSandboxClient[DaytonaSandboxClientOptions]):
     ) -> SandboxSession:
         if manifest is None:
             manifest = Manifest(root=DEFAULT_DAYTONA_WORKSPACE_ROOT)
+        self._validate_create_manifest(manifest)
 
         timeouts_in = options.timeouts
         if isinstance(timeouts_in, DaytonaSandboxTimeouts):
@@ -1326,6 +1327,7 @@ class DaytonaSandboxClient(BaseSandboxClient[DaytonaSandboxClientOptions]):
     ) -> SandboxSession:
         if not isinstance(state, DaytonaSandboxSessionState):
             raise TypeError("DaytonaSandboxClient.resume expects a DaytonaSandboxSessionState")
+        self._validate_session_state(state)
         state.assert_path_grants_rebound()
 
         daytona_sandbox = None

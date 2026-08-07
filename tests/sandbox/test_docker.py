@@ -2436,9 +2436,7 @@ async def test_docker_create_container_grants_fuse_for_in_container_rclone_mount
 
 
 @pytest.mark.asyncio
-async def test_docker_create_container_grants_sys_admin_for_s3_files_mount(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_docker_rejects_s3_files_mount_before_container_creation() -> None:
     container = _ResumeContainer(status="created")
     docker_client = _FakeCreateDockerClient(container)
     client = DockerSandboxClient(docker_client=cast(object, docker_client))
@@ -2451,22 +2449,13 @@ async def test_docker_create_container_grants_sys_admin_for_s3_files_mount(
         }
     )
 
-    monkeypatch.setattr(client, "image_exists", lambda _image: True)
+    with pytest.raises(
+        MountConfigError,
+        match="mount type does not support credentialless in-container mounting",
+    ):
+        await client._create_container(DEFAULT_PYTHON_SANDBOX_IMAGE, manifest=manifest)
 
-    created = await client._create_container(DEFAULT_PYTHON_SANDBOX_IMAGE, manifest=manifest)
-
-    assert created is container
-    assert docker_client.containers.calls == [
-        {
-            "entrypoint": ["tail"],
-            "image": DEFAULT_PYTHON_SANDBOX_IMAGE,
-            "detach": True,
-            "command": ["-f", "/dev/null"],
-            "environment": {},
-            "cap_add": ["SYS_ADMIN"],
-            "security_opt": ["apparmor:unconfined"],
-        }
-    ]
+    assert docker_client.containers.calls == []
 
 
 class _ExecRunContainer:

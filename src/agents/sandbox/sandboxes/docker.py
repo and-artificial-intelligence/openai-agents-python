@@ -1470,6 +1470,7 @@ class DockerSandboxClient(BaseSandboxClient[DockerSandboxClientOptions]):
         image = options.image
         session_id = uuid.uuid4()
         manifest = manifest or Manifest()
+        self._validate_create_manifest(manifest)
         _validate_docker_path_grants(manifest)
 
         container = await self._create_container(
@@ -1537,6 +1538,7 @@ class DockerSandboxClient(BaseSandboxClient[DockerSandboxClientOptions]):
     ) -> SandboxSession:
         if not isinstance(state, DockerSandboxSessionState):
             raise TypeError("DockerSandboxClient.resume expects a DockerSandboxSessionState")
+        self._validate_session_state(state)
         state.assert_path_grants_rebound()
         _validate_docker_path_grants(state.manifest)
         container = self.get_container(state.container_id)
@@ -1575,6 +1577,7 @@ class DockerSandboxClient(BaseSandboxClient[DockerSandboxClientOptions]):
         session_id: uuid.UUID | None = None,
     ) -> Container:
         if manifest is not None:
+            self._validate_create_manifest(manifest)
             _validate_docker_path_grants(manifest)
         # create image if it does not exist
         if not self.image_exists(image):

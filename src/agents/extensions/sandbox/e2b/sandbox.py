@@ -1693,6 +1693,7 @@ class E2BSandboxClient(BaseSandboxClient[E2BSandboxClientOptions]):
         if options is None:
             raise ValueError("E2BSandboxClient.create requires options")
         manifest = manifest or Manifest()
+        self._validate_create_manifest(manifest)
 
         sandbox_type = _coerce_sandbox_type(options.sandbox_type)
 
@@ -1770,6 +1771,7 @@ class E2BSandboxClient(BaseSandboxClient[E2BSandboxClientOptions]):
     ) -> SandboxSession:
         if not isinstance(state, E2BSandboxSessionState):
             raise TypeError("E2BSandboxClient.resume expects an E2BSandboxSessionState")
+        self._validate_session_state(state)
         state.assert_path_grants_rebound()
 
         sandbox_type = _coerce_sandbox_type(state.sandbox_type)

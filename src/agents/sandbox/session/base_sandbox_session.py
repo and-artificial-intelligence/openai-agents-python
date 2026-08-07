@@ -219,7 +219,16 @@ class BaseSandboxSession(abc.ABC):
     _max_local_dir_file_concurrency: int | None = DEFAULT_MAX_LOCAL_DIR_FILE_CONCURRENCY
     _archive_limits: SandboxArchiveLimits | None = None
 
+    def _validate_mount_credential_boundaries(self) -> None:
+        from .._mount_security import validate_manifest_mount_credential_boundaries
+
+        validate_manifest_mount_credential_boundaries(
+            self.state.manifest,
+            provider_backend_id=self.state.type,
+        )
+
     async def start(self) -> None:
+        self._validate_mount_credential_boundaries()
         try:
             await self._ensure_backend_started()
             self._start_workspace_root_ready = self.state.workspace_root_ready
@@ -1204,6 +1213,12 @@ class BaseSandboxSession(abc.ABC):
         _ = only_ephemeral
 
     async def apply_manifest(self, *, only_ephemeral: bool = False) -> MaterializationResult:
+        from .._mount_security import validate_manifest_mount_credential_boundaries
+
+        validate_manifest_mount_credential_boundaries(
+            self.state.manifest,
+            provider_backend_id=self.state.type,
+        )
         await self._validate_manifest_application(only_ephemeral=only_ephemeral)
         return await self._apply_manifest(
             only_ephemeral=only_ephemeral,

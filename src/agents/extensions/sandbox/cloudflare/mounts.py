@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import ClassVar, Literal
 
 from ....sandbox.entries import GCSMount, Mount, R2Mount, S3Mount
 from ....sandbox.entries.mounts.base import MountStrategyBase
@@ -41,6 +41,7 @@ class CloudflareBucketMountConfig:
 
 class CloudflareBucketMountStrategy(MountStrategyBase):
     type: Literal["cloudflare_bucket_mount"] = "cloudflare_bucket_mount"
+    _provider_backend_id: ClassVar[str] = "cloudflare"
 
     def validate_mount(self, mount: Mount) -> None:
         _ = self._build_cloudflare_bucket_mount_config(mount)

@@ -9,8 +9,9 @@ from typing import cast
 import pytest
 
 from agents.sandbox import SandboxPathGrant
+from agents.sandbox.entries import InContainerMountStrategy, RcloneMountPattern, S3Mount
 from agents.sandbox.errors import PtySessionNotFoundError
-from agents.sandbox.manifest import Manifest
+from agents.sandbox.manifest import Environment, Manifest
 from agents.sandbox.sandboxes.unix_local import (
     UnixLocalSandboxClient,
     UnixLocalSandboxSession,
@@ -39,6 +40,43 @@ class _RecordingUnixLocalSession(UnixLocalSandboxSession):
         _ = timeout
         self.exec_commands.append(tuple(str(part) for part in command))
         return ExecResult(stdout=b"", stderr=b"", exit_code=0)
+
+
+@pytest.mark.asyncio
+async def test_unix_local_scrubs_inherited_mount_credentials_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "host-secret")
+    monkeypatch.setenv("RCLONE_CONFIG_REMOTE_ACCESS_KEY_ID", "host-access-key")
+    monkeypatch.setenv("RCLONE_S3_SECRET_ACCESS_KEY", "backend-secret")
+    monkeypatch.setenv("RCLONE_USER_AGENT", "generic-rclone-value")
+    monkeypatch.setenv("GITHUB_TOKEN", "unrelated-token")
+    manifest = Manifest(
+        root=str(tmp_path),
+        entries={
+            "data": S3Mount(
+                bucket="public-bucket",
+                mount_strategy=InContainerMountStrategy(pattern=RcloneMountPattern()),
+            )
+        },
+        environment=Environment(value={"AWS_SESSION_TOKEN": "explicit-sandbox-value"}),
+    )
+    session = UnixLocalSandboxSession(
+        state=UnixLocalSandboxSessionState(
+            manifest=manifest,
+            snapshot=NoopSnapshot(id="noop"),
+        )
+    )
+
+    env, _cwd = await session._resolved_exec_context()
+
+    assert "AWS_SECRET_ACCESS_KEY" not in env
+    assert "RCLONE_CONFIG_REMOTE_ACCESS_KEY_ID" not in env
+    assert "RCLONE_S3_SECRET_ACCESS_KEY" not in env
+    assert "RCLONE_USER_AGENT" not in env
+    assert env["GITHUB_TOKEN"] == "unrelated-token"
+    assert env["AWS_SESSION_TOKEN"] == "explicit-sandbox-value"
 
 
 @pytest.mark.asyncio

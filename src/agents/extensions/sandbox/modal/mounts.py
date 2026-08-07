@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import ClassVar, Literal
 
 from ....sandbox.entries import GCSMount, Mount, R2Mount, S3Mount
 from ....sandbox.entries.mounts.base import MountStrategyBase
@@ -26,6 +26,7 @@ class ModalCloudBucketMountConfig:
 
 class ModalCloudBucketMountStrategy(MountStrategyBase):
     type: Literal["modal_cloud_bucket"] = "modal_cloud_bucket"
+    _provider_backend_id: ClassVar[str] = "modal"
     secret_name: str | None = None
     secret_environment_name: str | None = None
 

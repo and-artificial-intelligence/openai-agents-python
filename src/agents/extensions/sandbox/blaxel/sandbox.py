@@ -434,6 +434,7 @@ class BlaxelSandboxSession(BaseSandboxSession):
     # -- lifecycle -----------------------------------------------------------
 
     async def start(self) -> None:
+        self._validate_mount_credential_boundaries()
         # When resuming a paused sandbox, _skip_start is set by the client to
         # avoid reapplying the full manifest over files that may have changed
         # while the sandbox was paused.
@@ -1065,6 +1066,7 @@ class BlaxelSandboxClient(BaseSandboxClient["BlaxelSandboxClientOptions"]):
     ) -> SandboxSession:
         if manifest is None:
             manifest = Manifest(root=DEFAULT_BLAXEL_WORKSPACE_ROOT)
+        self._validate_create_manifest(manifest)
 
         timeouts_in = options.timeouts
         if isinstance(timeouts_in, BlaxelTimeouts):
@@ -1145,6 +1147,7 @@ class BlaxelSandboxClient(BaseSandboxClient["BlaxelSandboxClientOptions"]):
         """
         if not isinstance(state, BlaxelSandboxSessionState):
             raise TypeError("BlaxelSandboxClient.resume expects a BlaxelSandboxSessionState")
+        self._validate_session_state(state)
         state.assert_path_grants_rebound()
 
         SandboxInstance = _import_blaxel_sdk()

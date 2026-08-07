@@ -741,6 +741,7 @@ class RunloopSandboxSession(BaseSandboxSession):
         In that path, Runloop reuses the live machine and only reapplies snapshot or ephemeral
         manifest state if the cached workspace fingerprint no longer matches.
         """
+        self._validate_mount_credential_boundaries()
         if self._skip_start:
             if await self.state.snapshot.restorable(dependencies=self.dependencies):
                 is_running = await self.running()
@@ -1578,6 +1579,7 @@ class RunloopSandboxClient(BaseSandboxClient[RunloopSandboxClientOptions | None]
 
         user_parameters = _normalize_runloop_user_parameters(resolved_options.user_parameters)
         manifest = manifest or Manifest(root=_default_runloop_manifest_root(user_parameters))
+        self._validate_create_manifest(manifest)
         _validate_runloop_manifest_root(manifest, user_parameters=user_parameters)
 
         timeouts_in = resolved_options.timeouts
@@ -1673,6 +1675,7 @@ class RunloopSandboxClient(BaseSandboxClient[RunloopSandboxClientOptions | None]
         """
         if not isinstance(state, RunloopSandboxSessionState):
             raise TypeError("RunloopSandboxClient.resume expects a RunloopSandboxSessionState")
+        self._validate_session_state(state)
         state.assert_path_grants_rebound()
 
         devbox = None

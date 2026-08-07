@@ -216,6 +216,8 @@ class SandboxRuntimeSessionManager(Generic[TContext]):
         return resources.session
 
     def serialize_resume_state(self) -> dict[str, object] | None:
+        from ._mount_security import manifest_mount_state_is_serializable
+
         existing_payload = (
             copy.deepcopy(self._run_state._sandbox)
             if self._run_state is not None and isinstance(self._run_state._sandbox, dict)
@@ -232,6 +234,11 @@ class SandboxRuntimeSessionManager(Generic[TContext]):
         resources = self._resources_by_agent.get(self._current_agent_id)
         if resources is None:
             return existing_payload
+        if not all(
+            manifest_mount_state_is_serializable(agent_resources.state.manifest)
+            for agent_resources in self._resources_by_agent.values()
+        ):
+            return None
 
         client = self._resolve_client()
         current_agent = self._acquired_agents.get(self._current_agent_id)
@@ -288,6 +295,19 @@ class SandboxRuntimeSessionManager(Generic[TContext]):
         concurrency_limits = self._resolve_concurrency_limits()
         archive_limits = self._resolve_archive_limits()
         if sandbox_config.session is not None:
+            from ._mount_security import validate_manifest_mount_credential_boundaries
+
+            current_manifest = sandbox_config.session.state.manifest
+            processed_manifest = self._process_manifest(
+                capabilities,
+                current_manifest,
+                run_as_user=self._agent_run_as_user(agent),
+            )
+            assert processed_manifest is not None
+            validate_manifest_mount_credential_boundaries(
+                processed_manifest,
+                provider_backend_id=sandbox_config.session.state.type,
+            )
             self._configure_session(
                 sandbox_config.session,
                 concurrency_limits=concurrency_limits,
@@ -295,9 +315,8 @@ class SandboxRuntimeSessionManager(Generic[TContext]):
             )
             running = await sandbox_config.session.running()
             manifest_update = self._process_live_session_manifest(
-                agent=agent,
-                capabilities=capabilities,
-                session=sandbox_config.session,
+                current_manifest=current_manifest,
+                processed_manifest=processed_manifest,
                 running=running,
             )
             if manifest_update.processed_manifest is not None:
@@ -340,6 +359,7 @@ class SandboxRuntimeSessionManager(Generic[TContext]):
                 session_state=explicit_state,
                 trusted_manifest=self._resolve_trusted_resume_manifest(agent=agent),
             )
+            client._validate_session_state(explicit_state)
             span_cm = (
                 custom_span(
                     "sandbox.resume_session",
@@ -553,18 +573,11 @@ class SandboxRuntimeSessionManager(Generic[TContext]):
     def _process_live_session_manifest(
         cls,
         *,
-        agent: SandboxAgent[TContext],
-        capabilities: list[Capability],
-        session: BaseSandboxSession,
+        current_manifest: Manifest,
+        processed_manifest: Manifest,
         running: bool,
     ) -> _LiveSessionManifestUpdate:
-        current_manifest = session.state.manifest
-        processed_manifest = cls._process_manifest(
-            capabilities,
-            current_manifest,
-            run_as_user=cls._agent_run_as_user(agent),
-        )
-        if processed_manifest is None or processed_manifest == current_manifest:
+        if processed_manifest == current_manifest:
             return _LiveSessionManifestUpdate(processed_manifest=None, entries_to_apply=[])
 
         cls._validate_live_session_host_path_grants(

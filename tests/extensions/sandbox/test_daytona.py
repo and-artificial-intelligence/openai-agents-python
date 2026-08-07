@@ -761,6 +761,37 @@ class TestDaytonaSandbox:
         assert resumed._inner._can_reuse_preserved_workspace_on_resume() is False  # noqa: SLF001
 
     @pytest.mark.asyncio
+    async def test_resume_rejects_unsafe_mount_before_provider_lookup(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        daytona_module = _load_daytona_module(monkeypatch)
+
+        async with daytona_module.DaytonaSandboxClient() as client:
+            session = await client.create(options=daytona_module.DaytonaSandboxClientOptions())
+            unsafe_state = session.state.model_copy(
+                update={
+                    "manifest": Manifest(
+                        root=daytona_module.DEFAULT_DAYTONA_WORKSPACE_ROOT,
+                        entries={
+                            "data": S3Mount(
+                                bucket="bucket",
+                                access_key_id="access-key",
+                                secret_access_key="secret-key",
+                                mount_strategy=DaytonaCloudBucketMountStrategy(),
+                            )
+                        },
+                    )
+                }
+            )
+            _FakeAsyncDaytona.get_calls.clear()
+
+            with pytest.raises(MountConfigError, match="is not supported inside the sandbox"):
+                await client.resume(unsafe_state)
+
+        assert _FakeAsyncDaytona.get_calls == []
+
+    @pytest.mark.asyncio
     async def test_resume_reconnects_unpaused_live_sandbox_after_unclean_worker_exit(
         self,
         monkeypatch: pytest.MonkeyPatch,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import shlex
 from pathlib import Path
-from typing import Literal, NoReturn
+from typing import ClassVar, Literal, NoReturn
 
 from ....sandbox.entries import Mount, S3Mount
 from ....sandbox.entries.mounts.base import MountStrategyBase
@@ -478,6 +478,7 @@ class VercelCloudBucketMountStrategy(MountStrategyBase):
     """
 
     type: Literal["vercel_cloud_bucket"] = "vercel_cloud_bucket"
+    _provider_backend_id: ClassVar[str] = "vercel"
 
     def validate_mount(self, mount: Mount) -> None:
         _validate_s3_mount(mount)

@@ -53,15 +53,18 @@ from agents.sandbox.capabilities import (
 )
 from agents.sandbox.entries import (
     BaseEntry,
+    DockerVolumeMountStrategy,
     File,
     InContainerMountStrategy,
     MountpointMountPattern,
+    RcloneMountPattern,
     S3Mount,
 )
 from agents.sandbox.errors import (
     ExecNonZeroError,
     ExecTransportError,
     InvalidManifestPathError,
+    MountConfigError,
     WorkspaceArchiveWriteError,
 )
 from agents.sandbox.files import EntryKind, FileEntry
@@ -750,6 +753,22 @@ class _ManifestMutationCapability(Capability):
     def process_manifest(self, manifest: Manifest) -> Manifest:
         self.process_calls += 1
         manifest.entries[self.rel_path] = File(content=self.content)
+        return manifest
+
+
+class _UnsafeMountMutationCapability(Capability):
+    type: str = "unsafe-mount-mutation"
+
+    def __init__(self) -> None:
+        super().__init__(type="unsafe-mount-mutation")
+
+    def process_manifest(self, manifest: Manifest) -> Manifest:
+        manifest.entries["data"] = S3Mount(
+            bucket="bucket",
+            access_key_id="access-key",
+            secret_access_key="credential-sentinel",
+            mount_strategy=InContainerMountStrategy(pattern=RcloneMountPattern()),
+        )
         return manifest
 
 
@@ -2068,7 +2087,7 @@ async def test_unix_local_client_delete_unmounts_workspace_mounts_before_rmtree(
         entries={
             "remote": S3Mount(
                 bucket="bucket",
-                mount_strategy=InContainerMountStrategy(pattern=MountpointMountPattern()),
+                mount_strategy=InContainerMountStrategy(pattern=RcloneMountPattern()),
             ),
         }
     )
@@ -2109,11 +2128,11 @@ async def test_unix_local_client_delete_unmounts_nested_mounts_deepest_first(
         entries={
             "outer": S3Mount(
                 bucket="bucket",
-                mount_strategy=InContainerMountStrategy(pattern=MountpointMountPattern()),
+                mount_strategy=InContainerMountStrategy(pattern=RcloneMountPattern()),
             ),
             "outer/child": S3Mount(
                 bucket="bucket",
-                mount_strategy=InContainerMountStrategy(pattern=MountpointMountPattern()),
+                mount_strategy=InContainerMountStrategy(pattern=RcloneMountPattern()),
             ),
         }
     )
@@ -2149,7 +2168,7 @@ async def test_unix_local_client_delete_skips_rmtree_when_unmount_fails(
         entries={
             "SECRET_REMOTE_MOUNT": S3Mount(
                 bucket="bucket",
-                mount_strategy=InContainerMountStrategy(pattern=MountpointMountPattern()),
+                mount_strategy=InContainerMountStrategy(pattern=RcloneMountPattern()),
             ),
         }
     )
@@ -3578,6 +3597,116 @@ async def test_session_manager_starts_stopped_injected_session_with_manifest_mut
     assert live_session.shutdown_calls == 0
     assert session.state.manifest.entries["cap.txt"] == File(content=b"capability")
     assert payload is None
+
+
+@pytest.mark.asyncio
+async def test_session_manager_rejects_unsafe_running_injected_session_before_probe() -> None:
+    class _UnprobedSession(_FakeSession):
+        async def running(self) -> bool:
+            raise AssertionError("running() must not be called before mount validation")
+
+    live_session = _UnprobedSession(
+        Manifest(
+            entries={
+                "data": S3Mount(
+                    bucket="bucket",
+                    access_key_id="access-key",
+                    secret_access_key="credential-sentinel",
+                    mount_strategy=InContainerMountStrategy(pattern=RcloneMountPattern()),
+                )
+            }
+        )
+    )
+    agent = SandboxAgent(name="worker", model=FakeModel(), instructions="Worker.")
+    manager = SandboxRuntimeSessionManager(
+        starting_agent=agent,
+        sandbox_config=SandboxRunConfig(session=live_session),
+        run_state=None,
+    )
+    manager.acquire_agent(agent)
+
+    try:
+        with pytest.raises(MountConfigError) as exc_info:
+            await manager.ensure_session(
+                agent=agent,
+                capabilities=[],
+                is_resumed_state=False,
+            )
+    finally:
+        manager._release_agents()
+
+    assert "credential-sentinel" not in str(exc_info.value)
+    assert "credential-sentinel" not in repr(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_session_manager_validates_capability_mount_mutation_before_probe() -> None:
+    class _UnprobedSession(_FakeSession):
+        async def running(self) -> bool:
+            raise AssertionError("running() must not be called before mount validation")
+
+    live_session = _UnprobedSession(Manifest())
+    agent = SandboxAgent(name="worker", model=FakeModel(), instructions="Worker.")
+    manager = SandboxRuntimeSessionManager(
+        starting_agent=agent,
+        sandbox_config=SandboxRunConfig(session=live_session),
+        run_state=None,
+    )
+    manager.acquire_agent(agent)
+
+    try:
+        with pytest.raises(MountConfigError) as exc_info:
+            await manager.ensure_session(
+                agent=agent,
+                capabilities=[_UnsafeMountMutationCapability()],
+                is_resumed_state=False,
+            )
+    finally:
+        manager._release_agents()
+
+    assert "credential-sentinel" not in str(exc_info.value)
+    assert "credential-sentinel" not in repr(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_base_session_apply_manifest_rejects_unsafe_mount_before_materialization() -> None:
+    session = _FakeSession(
+        Manifest(
+            entries={
+                "data": S3Mount(
+                    bucket="bucket",
+                    access_key_id="access-key",
+                    secret_access_key="credential-sentinel",
+                    mount_strategy=InContainerMountStrategy(pattern=RcloneMountPattern()),
+                )
+            }
+        )
+    )
+
+    with pytest.raises(MountConfigError) as exc_info:
+        await BaseSandboxSession.apply_manifest(session)
+
+    assert "credential-sentinel" not in str(exc_info.value)
+    assert "credential-sentinel" not in repr(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_base_session_start_rejects_wrong_backend_mount_before_startup() -> None:
+    session = _FakeSession(
+        Manifest(
+            entries={
+                "data": S3Mount(
+                    bucket="bucket",
+                    mount_strategy=DockerVolumeMountStrategy(driver="rclone"),
+                )
+            }
+        )
+    )
+
+    with pytest.raises(MountConfigError, match="not supported by this sandbox backend"):
+        await BaseSandboxSession.start(session)
+
+    assert session.start_calls == 0
 
 
 @pytest.mark.asyncio

@@ -2260,6 +2260,36 @@ class TestRunloopSandbox:
         assert snapshot.restorable_dependencies[-1] is not None
 
     @pytest.mark.asyncio
+    async def test_skip_start_rejects_unsafe_mount_before_resume_probe(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from agents.sandbox.entries import DockerVolumeMountStrategy, S3Mount
+        from agents.sandbox.errors import MountConfigError
+
+        runloop_module = _load_runloop_module(monkeypatch)
+        async with runloop_module.RunloopSandboxClient() as client:
+            session = await client.create(options=runloop_module.RunloopSandboxClientOptions())
+            inner = session._inner
+            inner._skip_start = True
+            inner.state.manifest = Manifest(
+                entries={
+                    "data": S3Mount(
+                        bucket="bucket",
+                        mount_strategy=DockerVolumeMountStrategy(driver="rclone"),
+                    )
+                }
+            )
+            sdk = _FakeAsyncRunloopSDK.created_instances[-1]
+            devbox = sdk.devbox.devboxes[inner.state.devbox_id]
+            exec_call_count = len(devbox.exec_calls)
+
+            with pytest.raises(MountConfigError, match="not supported by this sandbox backend"):
+                await session.start()
+
+            assert len(devbox.exec_calls) == exec_call_count
+
+    @pytest.mark.asyncio
     async def test_root_launch_exec_and_io_use_root_home(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -2870,12 +2900,14 @@ class TestRunloopSandbox:
         mount = _RecordingMount()
 
         async with runloop_module.RunloopSandboxClient() as client:
-            session = await client.create(
-                manifest=Manifest(
-                    root=runloop_module.DEFAULT_RUNLOOP_WORKSPACE_ROOT,
-                    entries={"mount": mount},
-                ),
-                options=runloop_module.RunloopSandboxClientOptions(),
+            session = await client.create(options=runloop_module.RunloopSandboxClientOptions())
+            session.state = session.state.model_copy(
+                update={
+                    "manifest": Manifest(
+                        root=runloop_module.DEFAULT_RUNLOOP_WORKSPACE_ROOT,
+                        entries={"mount": mount},
+                    )
+                }
             )
             archive = await session.persist_workspace()
 

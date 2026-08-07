@@ -1457,6 +1457,7 @@ class CloudflareSandboxClient(BaseSandboxClient[CloudflareSandboxClientOptions])
 
         if manifest is None:
             manifest = Manifest()
+        self._validate_create_manifest(manifest)
         if manifest.root != "/workspace":
             raise ConfigurationError(
                 message=(
@@ -1506,6 +1507,7 @@ class CloudflareSandboxClient(BaseSandboxClient[CloudflareSandboxClientOptions])
             raise TypeError(
                 "CloudflareSandboxClient.resume expects a CloudflareSandboxSessionState"
             )
+        self._validate_session_state(state)
         state.assert_path_grants_rebound()
         inner = CloudflareSandboxSession.from_state(
             state,

@@ -1627,6 +1627,33 @@ class TestTarExcludeArgs:
 
 class TestStartLifecycle:
     @pytest.mark.asyncio
+    async def test_start_rejects_unsafe_mount_before_workspace_mkdir(
+        self,
+        fake_sandbox: _FakeSandboxInstance,
+    ) -> None:
+        from agents.sandbox.entries import DockerVolumeMountStrategy, S3Mount
+        from agents.sandbox.errors import MountConfigError
+
+        state = _make_state().model_copy(
+            update={
+                "manifest": Manifest(
+                    entries={
+                        "data": S3Mount(
+                            bucket="bucket",
+                            mount_strategy=DockerVolumeMountStrategy(driver="rclone"),
+                        )
+                    }
+                )
+            }
+        )
+        session = _make_session(fake_sandbox, state=state)
+
+        with pytest.raises(MountConfigError, match="not supported by this sandbox backend"):
+            await session.start()
+
+        assert fake_sandbox.process.exec_calls == []
+
+    @pytest.mark.asyncio
     async def test_start_mkdir_failure_suppressed(self, fake_sandbox: _FakeSandboxInstance) -> None:
         session = _make_session(fake_sandbox)
 
