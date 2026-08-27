@@ -2461,6 +2461,35 @@ def test_opaque_external_authority_remains_resumable_through_trusted_rebind(
     assert rebound.mount_authority_redacted is False
 
 
+def test_modal_oidc_role_remains_resumable_through_trusted_rebind() -> None:
+    role_arn = "arn:aws:iam::123456789012:role/modal-s3-reader"
+    modal_mounts = importlib.import_module("agents.extensions.sandbox.modal.mounts")
+    manifest = Manifest(
+        entries={
+            "data": S3Mount(
+                bucket="example-bucket",
+                mount_strategy=modal_mounts.ModalCloudBucketMountStrategy(
+                    oidc_auth_role_arn=role_arn
+                ),
+            )
+        }
+    )
+    client = _SecurityTestClient()
+    state = TestSessionState(manifest=manifest, snapshot=NoopSnapshot(id="snapshot"))
+
+    payload = client.serialize_session_state(state)
+    restored = client.deserialize_session_state(payload)
+    rebound = restored.rebind_persisted_mount_authority(
+        manifest,
+        provider_backend_id="modal",
+    )
+
+    assert payload[REDACTED_MOUNT_AUTHORITY_KEY] is True
+    assert role_arn not in repr(payload)
+    assert rebound.manifest == manifest
+    assert rebound.mount_authority_redacted is False
+
+
 def test_in_container_acknowledgement_is_rebound_only_from_trusted_manifest() -> None:
     manifest = Manifest(
         entries={
