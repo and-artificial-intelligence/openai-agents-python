@@ -382,12 +382,14 @@ def _load_modal_module(
             bucket_endpoint_url: str | None = None,
             key_prefix: str | None = None,
             secret: _FakeSecret | None = None,
+            oidc_auth_role_arn: str | None = None,
             read_only: bool = True,
         ) -> None:
             self.bucket_name = bucket_name
             self.bucket_endpoint_url = bucket_endpoint_url
             self.key_prefix = key_prefix
             self.secret = secret
+            self.oidc_auth_role_arn = oidc_auth_role_arn
             self.read_only = read_only
 
     class _FakeConfig:
@@ -901,6 +903,39 @@ async def test_modal_sandbox_create_passes_named_modal_secret_environment_for_cl
     assert mount.secret.value is None
 
 
+@pytest.mark.asyncio
+async def test_modal_sandbox_create_passes_oidc_role_for_cloud_bucket_mount(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    modal_module, create_calls, _registry_tags = _load_modal_module(monkeypatch)
+    role_arn = "arn:aws:iam::123456789012:role/modal-s3-reader"
+
+    client = modal_module.ModalSandboxClient()
+    await client.create(
+        manifest=Manifest(
+            entries={
+                "remote": S3Mount(
+                    bucket="bucket",
+                    prefix="nested/prefix/",
+                    mount_strategy=modal_module.ModalCloudBucketMountStrategy(
+                        oidc_auth_role_arn=role_arn
+                    ),
+                    read_only=False,
+                )
+            }
+        ),
+        options=modal_module.ModalSandboxClientOptions(app_name="sandbox-tests"),
+    )
+
+    assert create_calls
+    volumes = create_calls[0]["volumes"]
+    assert isinstance(volumes, dict)
+    mount = volumes["/workspace/remote"]
+    assert mount.secret is None
+    assert mount.oidc_auth_role_arn == role_arn
+    assert mount.read_only is False
+
+
 def test_modal_cloud_bucket_mount_strategy_round_trips_through_manifest_parse(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -980,6 +1015,34 @@ def test_modal_cloud_bucket_mount_strategy_round_trips_secret_env_name(
     assert mount.mount_strategy.secret_environment_name == "staging"
 
 
+def test_modal_cloud_bucket_mount_strategy_round_trips_oidc_role(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    modal_module, _create_calls, _registry_tags = _load_modal_module(monkeypatch)
+    role_arn = "arn:aws:iam::123456789012:role/modal-s3-reader"
+
+    manifest = Manifest.model_validate(
+        {
+            "entries": {
+                "remote": {
+                    "type": "s3_mount",
+                    "bucket": "bucket",
+                    "mount_strategy": {
+                        "type": "modal_cloud_bucket",
+                        "oidc_auth_role_arn": role_arn,
+                    },
+                }
+            }
+        }
+    )
+
+    mount = manifest.entries["remote"]
+
+    assert isinstance(mount, S3Mount)
+    assert isinstance(mount.mount_strategy, modal_module.ModalCloudBucketMountStrategy)
+    assert mount.mount_strategy.oidc_auth_role_arn == role_arn
+
+
 def test_modal_cloud_bucket_mount_strategy_builds_s3_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1054,6 +1117,21 @@ def test_modal_cloud_bucket_mount_strategy_builds_s3_config_with_named_secret_en
     assert config.secret_name == "named-modal-secret"
     assert config.secret_environment_name == "staging"
     assert config.read_only is False
+
+
+def test_modal_cloud_bucket_mount_strategy_builds_s3_config_with_oidc_role(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    modal_module, _create_calls, _registry_tags = _load_modal_module(monkeypatch)
+    role_arn = "arn:aws:iam::123456789012:role/modal-s3-reader"
+    strategy = modal_module.ModalCloudBucketMountStrategy(oidc_auth_role_arn=role_arn)
+    mount = S3Mount(bucket="bucket", mount_strategy=strategy)
+
+    config = strategy._build_modal_cloud_bucket_mount_config(mount)  # noqa: SLF001
+
+    assert config.credentials is None
+    assert config.secret_name is None
+    assert config.oidc_auth_role_arn == role_arn
 
 
 def test_modal_cloud_bucket_mount_strategy_builds_r2_config(
@@ -1162,6 +1240,44 @@ def test_modal_cloud_bucket_mount_strategy_rejects_mixed_inline_credentials_and_
                 secret_access_key="secret-key",
                 mount_strategy=strategy,
             )
+        )
+
+
+@pytest.mark.parametrize(
+    "strategy_kwargs,mount_kwargs,error_match",
+    [
+        (
+            {"oidc_auth_role_arn": ""},
+            {},
+            "oidc_auth_role_arn must be a non-empty string",
+        ),
+        (
+            {
+                "oidc_auth_role_arn": "arn:aws:iam::123456789012:role/modal-s3-reader",
+                "secret_name": "named-modal-secret",
+            },
+            {},
+            "do not support both oidc_auth_role_arn and secret_name",
+        ),
+        (
+            {"oidc_auth_role_arn": "arn:aws:iam::123456789012:role/modal-s3-reader"},
+            {"access_key_id": "access-key", "secret_access_key": "secret-key"},
+            "do not support both oidc_auth_role_arn and inline credentials",
+        ),
+    ],
+)
+def test_modal_cloud_bucket_mount_strategy_rejects_mixed_oidc_auth(
+    monkeypatch: pytest.MonkeyPatch,
+    strategy_kwargs: dict[str, str],
+    mount_kwargs: dict[str, Any],
+    error_match: str,
+) -> None:
+    modal_module, _create_calls, _registry_tags = _load_modal_module(monkeypatch)
+    strategy = modal_module.ModalCloudBucketMountStrategy(**strategy_kwargs)
+
+    with pytest.raises(MountConfigError, match=error_match):
+        strategy._build_modal_cloud_bucket_mount_config(  # noqa: SLF001
+            S3Mount(bucket="bucket", mount_strategy=strategy, **mount_kwargs)
         )
 
 
