@@ -943,14 +943,10 @@ async def test_modal_cloud_bucket_mount_accepts_modal_session_subclasses(subclas
 
 async def test_modal_cloud_bucket_mount_rejects_non_modal_session_with_same_class_name() -> None:
     from agents.extensions.sandbox.modal.mounts import ModalCloudBucketMountStrategy
-    from agents.sandbox.sandboxes.unix_local import (
-        UnixLocalSandboxSession,
-        UnixLocalSandboxSessionState,
-    )
-    from agents.sandbox.snapshot import NoopSnapshot
+    from agents.testing.sandbox import _ScriptedSandboxSession
 
     # A backend's class name does not establish its provider identity.
-    class ModalSandboxSession(UnixLocalSandboxSession):
+    class ModalSandboxSession(_ScriptedSandboxSession):
         pass
 
     strategy = ModalCloudBucketMountStrategy()
@@ -960,16 +956,14 @@ async def test_modal_cloud_bucket_mount_rejects_non_modal_session_with_same_clas
         secret_access_key="test-only-secret",
         mount_strategy=strategy,
     )
-    session = ModalSandboxSession(
-        state=UnixLocalSandboxSessionState(
-            manifest=Manifest(entries={"remote": mount}), snapshot=NoopSnapshot(id="noop")
-        )
-    )
+    session = ModalSandboxSession(steps=[], manifest=Manifest(entries={"remote": mount}))
     for operation in (strategy.activate, strategy.deactivate):
         with pytest.raises(MountConfigError) as exc_info:
             await operation(mount, session, Path("/workspace/remote"), Path("/"))
         assert "test-only-secret" not in str(exc_info.value)
         assert "test-only-access" not in str(exc_info.value)
+    assert session.calls == ()
+    session.assert_complete()
 
 
 def test_modal_cloud_bucket_mount_strategy_round_trips_through_manifest_parse(
