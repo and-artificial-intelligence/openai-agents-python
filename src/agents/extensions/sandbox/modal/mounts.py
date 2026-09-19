@@ -47,7 +47,9 @@ class ModalCloudBucketMountStrategy(MountStrategyBase):
         dest: Path,
         base_dir: Path,
     ) -> list[MaterializedFile]:
-        if type(session).__name__ != "ModalSandboxSession":
+        from .sandbox import ModalSandboxSession
+
+        if not isinstance(session, ModalSandboxSession):
             raise MountConfigError(
                 message="modal cloud bucket mounts are not supported by this sandbox backend",
                 context={"mount_type": mount.type, "session_type": type(session).__name__},
@@ -63,7 +65,9 @@ class ModalCloudBucketMountStrategy(MountStrategyBase):
         dest: Path,
         base_dir: Path,
     ) -> None:
-        if type(session).__name__ != "ModalSandboxSession":
+        from .sandbox import ModalSandboxSession
+
+        if not isinstance(session, ModalSandboxSession):
             raise MountConfigError(
                 message="modal cloud bucket mounts are not supported by this sandbox backend",
                 context={"mount_type": mount.type, "session_type": type(session).__name__},
