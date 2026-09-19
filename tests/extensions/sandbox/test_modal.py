@@ -936,6 +936,65 @@ async def test_modal_sandbox_create_passes_oidc_role_for_cloud_bucket_mount(
     assert mount.read_only is False
 
 
+@pytest.mark.parametrize("subclassed", [False, True])
+async def test_modal_cloud_bucket_mount_accepts_modal_session_subclasses(subclassed: bool) -> None:
+    from agents.extensions.sandbox.modal.mounts import ModalCloudBucketMountStrategy
+    from agents.extensions.sandbox.modal.sandbox import (
+        ModalSandboxSession,
+        ModalSandboxSessionState,
+    )
+    from agents.sandbox.snapshot import NoopSnapshot
+
+    class ManagedSession(ModalSandboxSession):
+        pass
+
+    strategy = ModalCloudBucketMountStrategy()
+    mount = S3Mount(bucket="bucket", mount_strategy=strategy)
+    session_type = ManagedSession if subclassed else ModalSandboxSession
+    session = session_type(
+        state=ModalSandboxSessionState(
+            app_name="test-app",
+            manifest=Manifest(entries={"remote": mount}),
+            snapshot=NoopSnapshot(id="noop"),
+        )
+    )
+    strategy.validate_mount(mount)
+    assert await strategy.activate(mount, session, Path("/workspace/remote"), Path("/")) == []
+    assert await strategy.deactivate(mount, session, Path("/workspace/remote"), Path("/")) is None
+    assert session.state.sandbox_id is None
+
+
+async def test_modal_cloud_bucket_mount_rejects_non_modal_session_with_same_class_name() -> None:
+    from agents.extensions.sandbox.modal.mounts import ModalCloudBucketMountStrategy
+    from agents.sandbox.sandboxes.unix_local import (
+        UnixLocalSandboxSession,
+        UnixLocalSandboxSessionState,
+    )
+    from agents.sandbox.snapshot import NoopSnapshot
+
+    # A backend's class name does not establish its provider identity.
+    class ModalSandboxSession(UnixLocalSandboxSession):
+        pass
+
+    strategy = ModalCloudBucketMountStrategy()
+    mount = S3Mount(
+        bucket="bucket",
+        access_key_id="test-only-access",
+        secret_access_key="test-only-secret",
+        mount_strategy=strategy,
+    )
+    session = ModalSandboxSession(
+        state=UnixLocalSandboxSessionState(
+            manifest=Manifest(entries={"remote": mount}), snapshot=NoopSnapshot(id="noop")
+        )
+    )
+    for operation in (strategy.activate, strategy.deactivate):
+        with pytest.raises(MountConfigError) as exc_info:
+            await operation(mount, session, Path("/workspace/remote"), Path("/"))
+        assert "test-only-secret" not in str(exc_info.value)
+        assert "test-only-access" not in str(exc_info.value)
+
+
 def test_modal_cloud_bucket_mount_strategy_round_trips_through_manifest_parse(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
