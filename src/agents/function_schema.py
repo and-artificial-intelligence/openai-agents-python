@@ -371,6 +371,9 @@ def _function_schema_cache_key(
         signature = inspect.signature(func)
         key = (
             func.__code__,
+            # Code equality ignores co_filename, so equal code can come from different modules.
+            func.__module__,
+            func.__code__.co_filename,
             func.__name__,
             inspect.getdoc(func),
             repr(signature),

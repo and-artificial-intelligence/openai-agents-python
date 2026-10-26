@@ -1,3 +1,4 @@
+import types
 from collections.abc import Callable, Mapping
 from enum import Enum
 from typing import Annotated, Any, Literal
@@ -1338,6 +1339,32 @@ def _make_factory_default_tool(default_limit: int) -> Callable[..., str]:
     return lookup_many
 
 
+_STRING_ANNOTATION_TOOL_SOURCE = """
+from __future__ import annotations
+
+from pydantic import BaseModel
+
+
+class Payload(BaseModel):
+    value: int = {default_value}
+
+
+def use(payload: Payload) -> int:
+    return 0
+"""
+
+
+def _load_string_annotation_tool(
+    module_name: str, filename: str, default_value: int
+) -> Callable[..., int]:
+    # Every load compiles equal `use` code; only the module globals say which `Payload` it names.
+    module = types.ModuleType(module_name)
+    source = _STRING_ANNOTATION_TOOL_SOURCE.format(default_value=default_value)
+    exec(compile(source, filename, "exec"), module.__dict__)
+    use: Callable[..., int] = module.use
+    return use
+
+
 def test_function_schema_reuses_build_for_closures_of_one_definition() -> None:
     first = function_schema(_make_lookup_tool(5))
     second = function_schema(_make_lookup_tool(5), description_override="Override")
@@ -1361,3 +1388,13 @@ def test_function_schema_cache_keeps_closure_inputs_apart() -> None:
         assert lookup_model(query="q").limit == default
         assert payload_model(payload={}).payload.value == default
         assert factory_model().limits == [default]
+
+    for module_name, filename, default in (
+        ("tool_plugin", "/plugins/a/tool_plugin.py", 1),
+        ("tool_plugin", "/plugins/b/tool_plugin.py", 2),
+        ("other_plugin", "/plugins/b/tool_plugin.py", 3),
+    ):
+        tool = _load_string_annotation_tool(module_name, filename, default)
+        module_model = function_schema(tool).params_pydantic_model
+
+        assert module_model(payload={}).payload.value == default
