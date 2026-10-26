@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import inspect
 import logging
 import re
+import threading
+from collections import OrderedDict
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Annotated, Any, Literal, get_args, get_origin, get_type_hints
 
 # griffelib exposes the `griffe` package at runtime but currently does not ship typing markers.
@@ -325,6 +328,64 @@ def _extract_field_info_from_metadata(metadata: tuple[Any, ...]) -> FieldInfo | 
     return None
 
 
+# Repeated function_tool calls on closures rebuild identical Pydantic models and strict schemas.
+# The key omits only module globals named by string annotations, which must not change later.
+_FUNCTION_SCHEMA_CACHE_MAXSIZE = 512
+_function_schema_cache: OrderedDict[tuple[Any, ...], FuncSchema] = OrderedDict()
+_function_schema_cache_lock = threading.Lock()
+
+
+def _schema_references(signature: inspect.Signature) -> tuple[Any, ...]:
+    """Returns the classes and default factories that a signature's repr does not identify."""
+    references: list[Any] = []
+    stack: list[Any] = [signature.return_annotation]
+    for parameter in signature.parameters.values():
+        stack.extend((parameter.annotation, parameter.default))
+    while stack:
+        item = stack.pop()
+        if isinstance(item, type):
+            references.append(item)
+        elif isinstance(item, FieldInfo) and item.default_factory is not None:
+            references.append(item.default_factory)
+        stack.extend(get_args(item))
+    return tuple(references)
+
+
+def _function_schema_cache_key(
+    func: Callable[..., Any],
+    *,
+    docstring_style: DocstringStyle | None,
+    name_override: str | None,
+    use_docstring_info: bool,
+    strict_json_schema: bool,
+) -> tuple[tuple[Any, ...], inspect.Signature] | None:
+    # Wrappers and tool.py's callable-object adapters share one code object but take their
+    # schema inputs from `__wrapped__` or `__signature__`.
+    if (
+        not inspect.isfunction(func)
+        or hasattr(func, "__wrapped__")
+        or "__signature__" in func.__dict__
+    ):
+        return None
+    try:
+        signature = inspect.signature(func)
+        key = (
+            func.__code__,
+            func.__name__,
+            inspect.getdoc(func),
+            repr(signature),
+            _schema_references(signature),
+            name_override,
+            docstring_style,
+            use_docstring_info,
+            strict_json_schema,
+        )
+        hash(key)
+    except Exception:
+        return None
+    return key, signature
+
+
 def function_schema(
     func: Callable[..., Any],
     docstring_style: DocstringStyle | None = None,
@@ -353,9 +414,63 @@ def function_schema(
 
     Returns:
         A `FuncSchema` object containing the function's name, description, parameter descriptions,
-        and other metadata.
+        and other metadata. Results for plain functions are cached per definition, and cached
+        results share `params_pydantic_model`.
     """
+    cache_entry = _function_schema_cache_key(
+        func,
+        docstring_style=docstring_style,
+        name_override=name_override,
+        use_docstring_info=use_docstring_info,
+        strict_json_schema=strict_json_schema,
+    )
+    if cache_entry is None:
+        return _build_function_schema(
+            func,
+            docstring_style,
+            name_override,
+            description_override,
+            use_docstring_info,
+            strict_json_schema,
+        )
 
+    key, signature = cache_entry
+    with _function_schema_cache_lock:
+        cached = _function_schema_cache.get(key)
+        if cached is not None:
+            _function_schema_cache.move_to_end(key)
+
+    if cached is None:
+        cached = _build_function_schema(
+            func,
+            docstring_style,
+            name_override,
+            None,
+            use_docstring_info,
+            strict_json_schema,
+        )
+        with _function_schema_cache_lock:
+            _function_schema_cache[key] = cached
+            _function_schema_cache.move_to_end(key)
+            while len(_function_schema_cache) > _FUNCTION_SCHEMA_CACHE_MAXSIZE:
+                _function_schema_cache.popitem(last=False)
+
+    return replace(
+        cached,
+        description=description_override or cached.description,
+        params_json_schema=copy.deepcopy(cached.params_json_schema),
+        signature=signature,
+    )
+
+
+def _build_function_schema(
+    func: Callable[..., Any],
+    docstring_style: DocstringStyle | None,
+    name_override: str | None,
+    description_override: str | None,
+    use_docstring_info: bool,
+    strict_json_schema: bool,
+) -> FuncSchema:
     # 1. Grab docstring info
     if use_docstring_info:
         doc_info = generate_func_documentation(func, docstring_style)

@@ -3,7 +3,7 @@ from enum import Enum
 from typing import Annotated, Any, Literal
 
 import pytest
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, create_model
 from pydantic.json_schema import PydanticJsonSchemaWarning
 from typing_extensions import TypedDict
 
@@ -1303,3 +1303,61 @@ def test_to_call_args_allows_kwargs_key_matching_var_positional_param() -> None:
     args, kwargs_dict = fs.to_call_args(parsed)
 
     assert _kwargs_var_positional_name(*args, **kwargs_dict) == ((1,), {"rest": 5})
+
+
+def _make_lookup_tool(default_limit: int) -> Callable[..., str]:
+    def lookup(query: str, limit: int = default_limit) -> str:
+        """Look up records.
+
+        Args:
+            query: The text to search for.
+            limit: The most records to return.
+        """
+        return f"{query}:{limit}"
+
+    return lookup
+
+
+def _make_payload_tool(default_value: int) -> Callable[..., int]:
+    # Every call creates a new class with the same repr as the others.
+    payload_model = create_model("Payload", value=(int, default_value))
+
+    def use(payload: payload_model) -> int:  # pyright: ignore[reportInvalidTypeForm]
+        return 0
+
+    return use
+
+
+def _make_factory_default_tool(default_limit: int) -> Callable[..., str]:
+    # FieldInfo's repr shows every closure factory only as `<lambda>`.
+    def lookup_many(
+        limits: list[int] = Field(default_factory=lambda: [default_limit]),  # noqa: B008
+    ) -> str:
+        return str(limits)
+
+    return lookup_many
+
+
+def test_function_schema_reuses_build_for_closures_of_one_definition() -> None:
+    first = function_schema(_make_lookup_tool(5))
+    second = function_schema(_make_lookup_tool(5), description_override="Override")
+
+    assert second.params_pydantic_model is first.params_pydantic_model
+    assert second.params_json_schema == first.params_json_schema
+    assert second.params_json_schema is not first.params_json_schema
+    assert first.description == "Look up records."
+    assert second.description == "Override"
+
+    first.params_json_schema["properties"].clear()
+    assert function_schema(_make_lookup_tool(5)).params_json_schema == second.params_json_schema
+
+
+def test_function_schema_cache_keeps_closure_inputs_apart() -> None:
+    for default in (1, 2):
+        lookup_model = function_schema(_make_lookup_tool(default)).params_pydantic_model
+        payload_model = function_schema(_make_payload_tool(default)).params_pydantic_model
+        factory_model = function_schema(_make_factory_default_tool(default)).params_pydantic_model
+
+        assert lookup_model(query="q").limit == default
+        assert payload_model(payload={}).payload.value == default
+        assert factory_model().limits == [default]

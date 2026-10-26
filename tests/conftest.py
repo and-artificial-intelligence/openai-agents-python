@@ -6,6 +6,7 @@ from collections.abc import Mapping, MutableMapping
 
 import pytest
 
+from agents.function_schema import _function_schema_cache
 from agents.models import _openai_shared
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 from agents.models.openai_responses import OpenAIResponsesModel
@@ -123,6 +124,11 @@ def clear_openai_settings():
 @pytest.fixture(autouse=True)
 def clear_default_runner():
     set_default_agent_runner(None)
+
+
+@pytest.fixture(autouse=True)
+def clear_function_schema_cache():
+    _function_schema_cache.clear()
 
 
 @pytest.fixture(autouse=True)
