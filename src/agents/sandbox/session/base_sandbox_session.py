@@ -1010,7 +1010,10 @@ class BaseSandboxSession(abc.ABC):
 
         # Materialize the archive into a local spool once because both `write()` and the
         # extraction step consume the stream, and zip extraction may require seeking.
-        spool = tempfile.SpooledTemporaryFile(max_size=16 * 1024 * 1024, mode="w+b")
+        # Python 3.10 does not model this binary stream as an IOBase subclass.
+        spool = cast(
+            io.IOBase, tempfile.SpooledTemporaryFile(max_size=16 * 1024 * 1024, mode="w+b")
+        )
         try:
             shutil.copyfileobj(data, spool)
             spool.seek(0)

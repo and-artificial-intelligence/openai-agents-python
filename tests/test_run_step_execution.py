@@ -5,6 +5,7 @@ import copy
 import dataclasses
 import gc
 import json
+import sys
 from collections.abc import Callable
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -1202,6 +1203,9 @@ async def test_execute_function_tool_calls_parent_cancellation_skips_post_invoke
     reason="eager_task_factory requires Python 3.12+",
 )
 async def test_execute_function_tool_calls_eager_task_factory_tracks_state_safely():
+    if sys.version_info < (3, 12):
+        pytest.skip("eager_task_factory requires Python 3.12+")
+
     async def _first_tool() -> str:
         return "first"
 
@@ -1228,7 +1232,7 @@ async def test_execute_function_tool_calls_eager_task_factory_tracks_state_safel
     ]
     loop = asyncio.get_running_loop()
     previous_task_factory = loop.get_task_factory()
-    eager_task_factory = cast(Any, asyncio.eager_task_factory)
+    eager_task_factory = asyncio.eager_task_factory
     loop.set_task_factory(eager_task_factory)
 
     try:

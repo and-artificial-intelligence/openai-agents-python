@@ -10,7 +10,7 @@ import tarfile
 import types
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, NoReturn, cast
+from typing import Any, NoReturn, TypedDict, cast
 
 import pytest
 from pydantic import Field, PrivateAttr
@@ -927,6 +927,11 @@ def test_modal_cloud_bucket_mount_strategy_rejects_mixed_inline_credentials_and_
         )
 
 
+class _S3CredentialKwargs(TypedDict, total=False):
+    access_key_id: str
+    secret_access_key: str
+
+
 @pytest.mark.parametrize(
     "strategy_kwargs,mount_kwargs,error_match",
     [
@@ -953,7 +958,7 @@ def test_modal_cloud_bucket_mount_strategy_rejects_mixed_inline_credentials_and_
 def test_modal_cloud_bucket_mount_strategy_rejects_mixed_oidc_auth(
     monkeypatch: pytest.MonkeyPatch,
     strategy_kwargs: dict[str, str],
-    mount_kwargs: dict[str, str],
+    mount_kwargs: _S3CredentialKwargs,
     error_match: str,
 ) -> None:
     modal_module, _create_calls, _registry_tags = _load_modal_module(monkeypatch)

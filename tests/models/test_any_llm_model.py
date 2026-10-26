@@ -746,7 +746,7 @@ def test_any_llm_reasoning_objects_prefer_content_attributes_over_iterable_pairs
         "any_llm",
         reason="`any-llm-sdk` is only available when the optional dependency is installed.",
     )
-    from any_llm.types.completion import Reasoning
+    Reasoning = importlib.import_module("any_llm.types.completion").Reasoning
 
     from agents.extensions.models.any_llm_model import _extract_any_llm_reasoning_text
 
