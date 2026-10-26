@@ -9,12 +9,14 @@ import threading
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass, replace
+from enum import Enum
 from typing import Annotated, Any, Literal, get_args, get_origin, get_type_hints
 
 # griffelib exposes the `griffe` package at runtime but currently does not ship typing markers.
 from griffe import Docstring, DocstringSectionKind  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field, create_model
 from pydantic.fields import FieldInfo
+from pydantic_core import PydanticUndefined
 
 from .exceptions import ModelBehaviorError, UserError
 from .run_context import RunContextWrapper
@@ -329,24 +331,49 @@ def _extract_field_info_from_metadata(metadata: tuple[Any, ...]) -> FieldInfo | 
 
 
 # Repeated function_tool calls on closures rebuild identical Pydantic models and strict schemas.
-# The key omits only module globals named by string annotations, which must not change later.
+# The key identifies default values by their repr, so functions with a default whose repr can
+# hide state always rebuild. Module globals named by string annotations are not in the key and
+# must not change later.
 _FUNCTION_SCHEMA_CACHE_MAXSIZE = 512
 _function_schema_cache: OrderedDict[tuple[Any, ...], FuncSchema] = OrderedDict()
 _function_schema_cache_lock = threading.Lock()
 
+# Checked by exact type, since a subclass can override __repr__.
+_LITERAL_DEFAULT_TYPES = (type(None), bool, int, float, str, bytes)
 
-def _schema_references(signature: inspect.Signature) -> tuple[Any, ...]:
-    """Returns the classes and default factories that a signature's repr does not identify."""
+
+def _is_literal_default(value: Any) -> bool:
+    """Returns whether a default's repr shows its whole value."""
+    return (
+        value is inspect.Parameter.empty
+        or value is PydanticUndefined
+        or type(value) in _LITERAL_DEFAULT_TYPES
+        or isinstance(value, Enum)
+    )
+
+
+def _schema_references(signature: inspect.Signature) -> tuple[Any, ...] | None:
+    """Returns the classes and default factories that a signature's repr does not identify.
+
+    Returns None if a parameter or `FieldInfo` default is not a literal.
+    """
     references: list[Any] = []
     stack: list[Any] = [signature.return_annotation]
     for parameter in signature.parameters.values():
+        if not isinstance(parameter.default, FieldInfo) and not _is_literal_default(
+            parameter.default
+        ):
+            return None
         stack.extend((parameter.annotation, parameter.default))
     while stack:
         item = stack.pop()
         if isinstance(item, type):
             references.append(item)
-        elif isinstance(item, FieldInfo) and item.default_factory is not None:
-            references.append(item.default_factory)
+        elif isinstance(item, FieldInfo):
+            if not _is_literal_default(item.default):
+                return None
+            if item.default_factory is not None:
+                references.append(item.default_factory)
         stack.extend(get_args(item))
     return tuple(references)
 
@@ -369,6 +396,9 @@ def _function_schema_cache_key(
         return None
     try:
         signature = inspect.signature(func)
+        references = _schema_references(signature)
+        if references is None:
+            return None
         key = (
             func.__code__,
             # Code equality ignores co_filename, so equal code can come from different modules.
@@ -377,7 +407,7 @@ def _function_schema_cache_key(
             func.__name__,
             inspect.getdoc(func),
             repr(signature),
-            _schema_references(signature),
+            references,
             name_override,
             docstring_style,
             use_docstring_info,
@@ -417,8 +447,8 @@ def function_schema(
 
     Returns:
         A `FuncSchema` object containing the function's name, description, parameter descriptions,
-        and other metadata. Results for plain functions are cached per definition, and cached
-        results share `params_pydantic_model`.
+        and other metadata. Results for plain functions with literal defaults are cached per
+        definition, and cached results share `params_pydantic_model`.
     """
     cache_entry = _function_schema_cache_key(
         func,

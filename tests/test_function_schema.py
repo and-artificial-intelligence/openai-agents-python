@@ -1339,6 +1339,26 @@ def _make_factory_default_tool(default_limit: int) -> Callable[..., str]:
     return lookup_many
 
 
+class _Scope(BaseModel):
+    label: str = "org"
+    org_id: int = Field(default=0, repr=False)
+
+
+def _make_hidden_default_tool(org_id: int) -> Callable[..., int]:
+    # The signature repr shows every closure's default as `_Scope(label='org')`.
+    def search(scope: _Scope = _Scope(org_id=org_id)) -> int:  # noqa: B008
+        return scope.org_id
+
+    return search
+
+
+def _make_hidden_field_tool(org_id: int) -> Callable[..., int]:
+    def search_field(scope: _Scope = Field(default=_Scope(org_id=org_id))) -> int:  # noqa: B008
+        return scope.org_id
+
+    return search_field
+
+
 _STRING_ANNOTATION_TOOL_SOURCE = """
 from __future__ import annotations
 
@@ -1384,10 +1404,14 @@ def test_function_schema_cache_keeps_closure_inputs_apart() -> None:
         lookup_model = function_schema(_make_lookup_tool(default)).params_pydantic_model
         payload_model = function_schema(_make_payload_tool(default)).params_pydantic_model
         factory_model = function_schema(_make_factory_default_tool(default)).params_pydantic_model
+        hidden_model = function_schema(_make_hidden_default_tool(default)).params_pydantic_model
+        hidden_field_model = function_schema(_make_hidden_field_tool(default)).params_pydantic_model
 
         assert lookup_model(query="q").limit == default
         assert payload_model(payload={}).payload.value == default
         assert factory_model().limits == [default]
+        assert hidden_model().scope.org_id == default
+        assert hidden_field_model().scope.org_id == default
 
     for module_name, filename, default in (
         ("tool_plugin", "/plugins/a/tool_plugin.py", 1),
